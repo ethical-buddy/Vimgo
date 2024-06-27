@@ -1,168 +1,141 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"sort"
-
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+    "github.com/gdamore/tcell/v2"
+    "github.com/rivo/tview"
+    "os"
+    "os/exec"
+    "path/filepath"
+    "sort"
+    "golang.org/x/term"
 )
 
 type FileManager struct {
-	app        *tview.Application
-	path       string
-	fileList   *tview.List
-	vimOutput  *tview.TextView
-	currentDir string
+    app   *tview.Application
+    list  *tview.List
+    path  string
+    items []string
+    oldState *term.State // To store original terminal state
 }
 
 func NewFileManager(path string) *FileManager {
-	app := tview.NewApplication()
-	fileList := tview.NewList().
-		ShowSecondaryText(false).
-		SetSelectedBackgroundColor(tcell.ColorLightBlue).
-		SetSelectedTextColor(tcell.ColorBlack).
-		SetBorder(true).
-		SetTitle(" File Manager ")
+    fm := &FileManager{
+        app:  tview.NewApplication(),
+        list: tview.NewList(),
+        path: path,
+    }
 
-	vimOutput := tview.NewTextView().
-		SetDynamicColors(true).
-		SetRegions(true).
-		SetChangedFunc(func() {
-			app.Draw()
-		})
-
-	return &FileManager{
-		app:        app,
-		path:       path,
-		fileList:   fileList,
-		vimOutput:  vimOutput,
-		currentDir: path,
-	}
+    fm.loadItems()
+    return fm
 }
 
-func (fm *FileManager) run() error {
-	if err := fm.refreshFileList(); err != nil {
-		return err
-	}
+func (fm *FileManager) loadItems() {
+    fm.list.Clear()
+    entries, err := os.ReadDir(fm.path)
+    if err != nil {
+        panic(err)
+    }
 
-	fm.fileList.SetInputCapture(fm.handleInput)
+    var dirs, files []string
+    for _, entry := range entries {
+        if entry.IsDir() {
+            dirs = append(dirs, entry.Name())
+        } else {
+            files = append(files, entry.Name())
+        }
+    }
 
-	flex := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(fm.fileList, 0, 1, true).
-		AddItem(fm.vimOutput, 0, 2, false)
+    sort.Strings(dirs)
+    sort.Strings(files)
 
-	if err := fm.app.SetRoot(flex, true).Run(); err != nil {
-		return err
-	}
-	return nil
+    fm.items = append(dirs, files...)
+    for _, item := range fm.items {
+        fm.list.AddItem(item, "", 0, nil)
+    }
 }
 
-func (fm *FileManager) refreshFileList() error {
-	fm.fileList.Clear()
+func (fm *FileManager) navigate(item string) {
+    newPath := filepath.Join(fm.path, item)
+    info, err := os.Stat(newPath)
+    if err != nil {
+        return
+    }
 
-	entries, err := os.ReadDir(fm.path)
-	if err != nil {
-		return err
-	}
-
-	var fileNames []string
-	for _, entry := range entries {
-		fileNames = append(fileNames, entry.Name())
-	}
-
-	sort.Strings(fileNames)
-
-	for _, name := range fileNames {
-		fm.fileList.AddItem(name, "", 0, nil)
-	}
-
-	return nil
+    if info.IsDir() {
+        fm.path = newPath
+        fm.loadItems()
+    } else {
+        fm.openInVim(newPath)
+    }
 }
 
-func (fm *FileManager) handleInput(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyEnter:
-		fm.handleEnter()
-	case tcell.KeyCtrlL:
-		fm.app.Draw()
-	case tcell.KeyCtrlC, tcell.KeyEsc:
-		fm.app.Stop()
-	case tcell.KeyRune:
-		switch event.Rune() {
-		case 'q':
-			fm.quitVim()
-		}
-	}
+func (fm *FileManager) openInVim(filepath string) {
+    // Save current terminal state
+    oldState, err := term.GetState(int(os.Stdin.Fd()))
+    if err != nil {
+        panic(err)
+    }
+    fm.oldState = oldState
 
-	return event
+    // Clear the screen to make space for Vim
+    exec.Command("clear").Run()
+
+    // Open the file in Vim
+    cmd := exec.Command("vim", filepath)
+    cmd.Stdin = os.Stdin
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+
+    // Start Vim
+    if err := cmd.Start(); err != nil {
+        panic(err)
+    }
+
+    // Wait for Vim to finish
+    if err := cmd.Wait(); err != nil {
+        panic(err)
+    }
+
+    // Restore terminal state after Vim exits
+    if fm.oldState != nil {
+        if err := term.Restore(int(os.Stdin.Fd()), fm.oldState); err != nil {
+            panic(err)
+        }
+    }
+
+    // Re-run the file manager application after closing Vim
+    fm.app.Draw()
 }
 
-func (fm *FileManager) handleEnter() {
-	selectedItemIndex := fm.fileList.GetCurrentItem()
-	if selectedItemIndex < 0 || selectedItemIndex >= fm.fileList.GetItemCount() {
-		return
-	}
+func (fm *FileManager) run() {
+    fm.list.SetSelectedFunc(func(index int, mainText, secondaryText string, shortcut rune) {
+        fm.navigate(mainText)
+    })
 
-	selectedItem := fm.fileList.GetItemAt(selectedItemIndex)
-	if selectedItem == nil {
-		return
-	}
+    fm.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+        switch event.Key() {
+        case tcell.KeyBackspace, tcell.KeyBackspace2:
+            fm.path = filepath.Dir(fm.path)
+            fm.loadItems()
+            return nil
+        case tcell.KeyRune:
+            switch event.Rune() {
+            case 'q':
+                fm.app.Stop()
+                return nil
+            }
+        }
+        return event
+    })
 
-	filePath := filepath.Join(fm.path, selectedItem.GetText())
+    fm.app.SetRoot(fm.list, true)
 
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		fmt.Fprintf(fm.vimOutput, "Error: %s\n", err)
-		return
-	}
-
-	if fileInfo.IsDir() {
-		fm.path = filePath
-		if err := fm.refreshFileList(); err != nil {
-			fmt.Fprintf(fm.vimOutput, "Error: %s\n", err)
-		}
-	} else {
-		fm.openInVim(filePath)
-	}
-}
-
-func (fm *FileManager) openInVim(filePath string) {
-	fm.vimOutput.Clear()
-
-	cmd := exec.Command("vim", filePath)
-	cmd.Stdout = fm.vimOutput
-	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(fm.vimOutput, "Error: %s\n", err)
-		return
-	}
-
-	if err := cmd.Wait(); err != nil {
-		fmt.Fprintf(fm.vimOutput, "Error: %s\n", err)
-	}
-}
-
-func (fm *FileManager) quitVim() {
-	// Placeholder for any cleanup needed when quitting Vim
+    if err := fm.app.Run(); err != nil {
+        panic(err)
+    }
 }
 
 func main() {
-	path, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("Error getting current directory: %s\n", err)
-		os.Exit(1)
-	}
-
-	fm := NewFileManager(path)
-	if err := fm.run(); err != nil {
-		fmt.Printf("Error running file manager: %s\n", err)
-		os.Exit(1)
-	}
+    fm := NewFileManager(".")
+    fm.run()
 }
