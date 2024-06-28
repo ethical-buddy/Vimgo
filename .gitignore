@@ -1,0 +1,11 @@
+# Build artifacts
+*.o
+*.so
+
+# Editor temporary files
+.*.swp
+*.swo
+
+# System files
+.DS_Store
+.git
