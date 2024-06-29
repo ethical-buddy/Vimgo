@@ -1,4 +1,4 @@
-FileManager: A Terminal-Based File Manager
+VIMGO : A Terminal-Based File Manager
 Overview
 FileManager is a terminal-based file manager written in Go. It provides a simple and intuitive way to navigate and manage files and directories in a terminal environment.
 
@@ -34,3 +34,15 @@ FileManager uses the following open-source libraries:
 
 tcell (github.com/gdamore/tcell/v2)
 tview (github.com/rivo/tview)
+
+
+
+
+
+INSTALLATION-
+
+chmod +x install.sh
+./install.sh
+
+
+vimgo
