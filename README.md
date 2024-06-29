@@ -41,8 +41,8 @@ tview (github.com/rivo/tview)
 
 INSTALLATION-
 
-chmod +x install.sh
-./install.sh
+$chmod +x install.sh
+$./install.sh
 
 
-vimgo
+$vimgo
