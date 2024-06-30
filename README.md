@@ -36,6 +36,7 @@ tcell (github.com/gdamore/tcell/v2)
 tview (github.com/rivo/tview)
 
 INSTALLATION-
+
 $chmod +x install.sh
 
 $./install.sh
