@@ -407,6 +407,12 @@ func (fm *FileManager) printCommandOutput(output string) {
 }
 
 func main() {
-	fm := NewFileManager(".")
-	fm.run()
+    // Check if running as root (sudo)
+    if os.Geteuid() != 0 {
+        fmt.Println("This tool requires sudo privileges. Run with 'sudo'.")
+        os.Exit(1)
+    }
+
+    fm := NewFileManager(".")
+    fm.run()
 }
